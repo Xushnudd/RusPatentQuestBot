@@ -22,7 +22,7 @@ async def start(m: Message):
     
     if str(user.user_id) == IS_ADMIN:
         if not user.is_admin:
-            user = await db.update_user(from_id, True)
+            user = await db.update_user(from_id, "is_admin", True)
         reply+="\n\n*Admin panelga kirish uchun /admin ustiga bosing !*"
         
     await m.answer(reply, parse_mode="Markdown", reply_markup=startButton())

@@ -16,18 +16,21 @@ async def get_or_create_user(user_id: str):
             
         return user
     
-async def update_user(user_id: str, is_admin: bool):
+async def update_user(user_id: str, field_name: str, new_data: any):
     async with AsyncSessionLocal() as session:
         stmt = select(User).where(User.user_id == user_id)
         result = await session.execute(stmt)
         user = result.scalar_one_or_none()
         
         if user:
-            user.is_admin = is_admin
-            await session.commit()
-            await session.refresh(user)
-            return user
-        
+            if hasattr(user, field_name):
+                setattr(user, field_name, new_data)
+                await session.commit()
+                await session.refresh(user)
+                return user
+            else:
+                raise ValueError(f"User modelida '{field_name}' nomli ustun mavjud emas!")
+                
         return None
     
     

@@ -153,22 +153,33 @@ async def send_current_question(event: Message | CallbackQuery, state: FSMContex
     ru_assignment = getattr(current_quest, "assignment", None)
     ru_question = sub_q['question']
 
-    # Asinxron tarjima
-    uz_assignment = await translate_text(ru_assignment) if ru_assignment else ""
+    # 1. Assignment va Question bir xil bo'lsa, ikkinchi marta ko'rsatmaymiz
+    show_assignment = ru_assignment and ru_assignment.strip() != ru_question.strip()
+    uz_assignment = await translate_text(ru_assignment) if show_assignment else ""
     uz_question = await translate_text(ru_question)
 
-    ru_text = ""
-    if ru_assignment:
-        ru_text += f"📋 <b>{ru_assignment}</b>\n\n"
-    ru_text += f"❓ <b>{ru_question}</b>\n\n"
-    for num, orig_idx in enumerate(shuffled_indices, start=1):
-        ru_text += f"<b>{num}.</b> {options[orig_idx]}\n"
+    # 2. Ruscha variantlarni tayyorlash
+    ru_opts = [options[i] for i in shuffled_indices]
 
-    uz_opts = await asyncio.gather(*[translate_text(options[i]) for i in shuffled_indices])
-    uz_text = f"📋 <b>{uz_assignment}</b>\n\n" if uz_assignment else ""
+    # 3. BARCHA VARIANTLARNI BITTA SO'ROVDA TARJIMA QILAMIZ (Google IP block bermaydi va to'g'ri tarjima qiladi)
+    combined_ru_opts = "\n".join(ru_opts)
+    combined_uz_opts = await translate_text(combined_ru_opts)
+    uz_opts = combined_uz_opts.split("\n")
+
+    # 4. Ruscha matnni yig'ish
+    ru_text = f"📋 <b>{ru_assignment}</b>\n\n" if show_assignment else ""
+    ru_text += f"❓ <b>{ru_question}</b>\n\n"
+    for num, opt in enumerate(ru_opts, start=1):
+        ru_text += f"<b>{num}.</b> {opt}\n"
+
+    # 5. O'zbekcha matnni yig'ish
+    uz_text = f"📋 <b>{uz_assignment}</b>\n\n" if show_assignment else ""
     uz_text += f"❓ <b>{uz_question}</b>\n\n"
-    for num, uz_opt in enumerate(uz_opts, start=1):
-        uz_text += f"<b>{num}.</b> {uz_opt}\n"
+
+    # Agar tarjima bo'lingan qatorlar soni mos tushsa uz_opts, aks holda ru_opts ishlatamiz
+    display_uz_opts = uz_opts if len(uz_opts) == len(ru_opts) else ru_opts
+    for num, opt in enumerate(display_uz_opts, start=1):
+        uz_text += f"<b>{num}.</b> {opt}\n"
 
     caption_text = f"{ru_text}\n------------\n\n{uz_text}"
     kb = prepare_question_keyboard(len(options), correct_idx, shuffled_indices)

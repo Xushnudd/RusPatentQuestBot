@@ -10,6 +10,7 @@ from handlers.start import start_router
 from handlers.quiz import quiz_router
 from handlers.statistics import statistics_router
 from handlers.info import info_router
+from handlers.admin_handler import admin_router
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -22,6 +23,7 @@ async def main():
     dp.include_router(quiz_router)
     dp.include_router(statistics_router)
     dp.include_router(info_router)
+    dp.include_router(admin_router)
     
     await init_db()
     await dp.start_polling(bot)

@@ -1,5 +1,6 @@
 import random
 import logging
+import asyncio
 import aiohttp
 from deep_translator import GoogleTranslator
 from imp import *
@@ -14,10 +15,11 @@ translator = GoogleTranslator(source='ru', target='uz')
 async def check_user_progress(user_id: str, admin_username: str, bot) -> bool:
     user = await get_or_create_user(user_id)
     correct_answers = user.current_question_index 
+    
     if correct_answers >= 10 and not user.is_premium:
         message = (
             f"Siz 10 ta to'g'ri javob berdingiz! 🎯\n"
-            f"Testni davom ettirish uchun premium sotib olishingiz kerak.\n"
+            f"Testni davom ettirish uchun premium sotib olishingiz kerak.\n\n"
             f"Murojaat uchun: @{admin_username}"
         )
         await bot.send_message(user_id, message)
@@ -25,21 +27,17 @@ async def check_user_progress(user_id: str, admin_username: str, bot) -> bool:
         
     return True
 
-def translate_text(text: str) -> str:
-    """Matnni o'zbek tiliga tarjima qilish uchun yordamchi funksiya"""
+async def translate_text(text: str) -> str:
+    """Matnni o'zbek tiliga asinxron tarjima qilish"""
     if not text:
         return ""
     try:
-        return translator.translate(text)
+        return await asyncio.to_thread(translator.translate, text)
     except Exception as e:
         logging.error(f"Tarjima qilishda xatolik: {e}")
-        return text  # Xatolik bo'lsa original matn qaytadi
+        return text
 
 def prepare_question_keyboard(options_count: int, correct_index: int, shuffled_indices: list) -> InlineKeyboardMarkup:
-    """
-    Tugmalarda faqat raqamlarni (1, 2, 3...) chiqarish uchun funksiya.
-    shuffled_indices - variantlar matnda qaysi tartibda joylashganini ko'rsatadi.
-    """
     buttons = []
     row = []
     for display_num, original_idx in enumerate(shuffled_indices, start=1):
@@ -52,25 +50,25 @@ def prepare_question_keyboard(options_count: int, correct_index: int, shuffled_i
 
 @quiz_router.message(F.text == text_uz["main_menu"]["start_test"])
 async def start_quiz(m: Message, state: FSMContext):
-    from_id = m.from_user.id
-    quest_ids = await get_random_quests()
+    from_id = str(m.from_user.id)
     
+    can_continue = await check_user_progress(from_id, admin_username="Blaskn1", bot=m.bot)
+    if not can_continue:
+        return
+
+    quest_ids = await get_random_quests()
     if not quest_ids:
         await m.answer("⚠️ Bazada hali savollar yo'q!")
         return
-    
-    can_continue = await check_user_progress(from_id, admin_username="Blaskn1", bot=m.bot)
-    if can_continue == False:
-        return False
-    else:
-        await state.update_data(
-            quest_ids=quest_ids,
-            quest_index=0,
-            sub_question_index=0,
-            correct_count=0,
-            total_answered=0
-        )
-        await send_current_question(m, state)
+
+    await state.update_data(
+        quest_ids=quest_ids,
+        quest_index=0,
+        sub_question_index=0,
+        correct_count=0,
+        total_answered=0
+    )
+    await send_current_question(m, state)
 
 
 async def send_audio_from_url(bot, chat_id: int, url: str, caption: str, reply_markup: InlineKeyboardMarkup) -> bool:
@@ -108,7 +106,6 @@ async def send_current_question(event: Message | CallbackQuery, state: FSMContex
     q_idx = data.get("quest_index", 0)
     sub_q_idx = data.get("sub_question_index", 0)
 
-    # 1. Test yakunlanganini tekshirish
     if q_idx >= len(quest_ids):
         total = data.get("total_answered", 0)
         correct = data.get("correct_count", 0)
@@ -144,7 +141,11 @@ async def send_current_question(event: Message | CallbackQuery, state: FSMContex
 
     sub_q = questions_list[sub_q_idx]
     correct_idx = sub_q.get("correct", 0)
-    options = sub_q.get("options", [])
+    options = sub_q.get("options") or []
+    if not options:
+        await state.update_data(sub_question_index=sub_q_idx + 1)
+        await send_current_question(event, state)
+        return
 
     shuffled_indices = list(range(len(options)))
     random.shuffle(shuffled_indices)
@@ -152,8 +153,9 @@ async def send_current_question(event: Message | CallbackQuery, state: FSMContex
     ru_assignment = getattr(current_quest, "assignment", None)
     ru_question = sub_q['question']
 
-    uz_assignment = translate_text(ru_assignment) if ru_assignment else ""
-    uz_question = translate_text(ru_question)
+    # Asinxron tarjima
+    uz_assignment = await translate_text(ru_assignment) if ru_assignment else ""
+    uz_question = await translate_text(ru_question)
 
     ru_text = ""
     if ru_assignment:
@@ -162,13 +164,11 @@ async def send_current_question(event: Message | CallbackQuery, state: FSMContex
     for num, orig_idx in enumerate(shuffled_indices, start=1):
         ru_text += f"<b>{num}.</b> {options[orig_idx]}\n"
 
-    uz_text = ""
-    if uz_assignment:
-        uz_text += f"📋 <b>{uz_assignment}</b>\n\n"
+    uz_opts = await asyncio.gather(*[translate_text(options[i]) for i in shuffled_indices])
+    uz_text = f"📋 <b>{uz_assignment}</b>\n\n" if uz_assignment else ""
     uz_text += f"❓ <b>{uz_question}</b>\n\n"
-    for num, orig_idx in enumerate(shuffled_indices, start=1):
-        uz_opt_translated = translate_text(options[orig_idx])
-        uz_text += f"<b>{num}.</b> {uz_opt_translated}\n"
+    for num, uz_opt in enumerate(uz_opts, start=1):
+        uz_text += f"<b>{num}.</b> {uz_opt}\n"
 
     caption_text = f"{ru_text}\n------------\n\n{uz_text}"
     kb = prepare_question_keyboard(len(options), correct_idx, shuffled_indices)
@@ -210,35 +210,26 @@ async def handle_answer(call: CallbackQuery, state: FSMContext):
     total_answered = data.get("total_answered", 0)
     sub_q_idx = data.get("sub_question_index", 0)
 
-    if chosen_idx == correct_idx:
-        correct_count += 1
-        await call.answer("✅ To'g'ri javob!", show_alert=False)
-        
-        # --- BAZADAGI TO'G'RI JAVOBELAR SONINI YANGILASH VA TEKSHIRISH ---
-        user = await get_or_create_user(user_id)
-        new_index = user.current_question_index + 1
-        await update_user(user_id, "current_question_index", new_index)
-
-        # Premium va 10 talik cheklovni tekshiramiz (Admin username ni o'zingiznikiga o'zgartiring)
-        can_continue = await check_user_progress(user_id, admin_username="Blaskn1", bot=call.bot)
-
-        if not can_continue:
-            # Agar limitga yetgan bo'lsa va premium bo'lmasa, testni shu yerda to'xtatamiz
-            try:
-                await call.message.edit_reply_markup(reply_markup=None)
-            except Exception:
-                pass
-            await state.clear()
-            return
-        # ---------------------------------------------------------------
-    else:
-        await call.answer("❌ Noto'g'ri javob!", show_alert=False)
-
-    # Foydalanuvchi qayta bosa olmasligi uchun knopkalarni olib tashlaymiz
+    # Eski knopkalarni olib tashlaymiz
     try:
         await call.message.edit_reply_markup(reply_markup=None)
     except Exception:
         pass
+
+    if chosen_idx == correct_idx:
+        correct_count += 1
+        await call.answer("✅ To'g'ri javob!", show_alert=False)
+        
+        user = await get_or_create_user(user_id)
+        new_index = user.current_question_index + 1
+        await update_user(user_id, "current_question_index", new_index)
+
+        can_continue = await check_user_progress(user_id, admin_username="Blaskn1", bot=call.bot)
+        if not can_continue:
+            await state.clear()
+            return
+    else:
+        await call.answer("❌ Noto'g'ri javob!", show_alert=False)
 
     await state.update_data(
         sub_question_index=sub_q_idx + 1,

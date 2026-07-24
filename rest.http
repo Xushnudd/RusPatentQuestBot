@@ -1,0 +1,23 @@
+POST http://localhost:8000/bots/ruspatentquest
+Content-Type: application/json
+
+{
+  "update_id": 10000001,
+  "message": {
+    "message_id": 1,
+    "from": {
+      "id": 6642543910,
+      "is_bot": false,
+      "first_name": "TestUser",
+      "username": "test_user"
+    },
+    "chat": {
+      "id": 6642543910,
+      "first_name": "TestUser",
+      "username": "test_user",
+      "type": "private"
+    },
+    "date": 1700000000,
+    "text": "/start"
+  }
+}

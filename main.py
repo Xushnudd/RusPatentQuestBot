@@ -14,6 +14,8 @@ from handlers.statistics import statistics_router
 from handlers.info import info_router
 from handlers.admin_handler import admin_router
 
+from db.seed import main
+
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
@@ -33,6 +35,7 @@ async def lifespan(app: FastAPI):
     await init_db()
     if WEBHOOK_URL:
         await bot.set_webhook(url=WEBHOOK_URL, drop_pending_updates=True)
+        await main()
     
     yield
     
